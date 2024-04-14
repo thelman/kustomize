@@ -1,0 +1,108 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nexus-storage
+  namespace: nexus
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nexus
+  namespace: nexus
+spec:
+  serviceName: nexus
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nexus
+  template:
+      metadata:
+        labels:
+          app: nexus
+      spec:
+        securityContext:
+          runAsUser: 200
+          runAsGroup: 200
+          fsGroup: 200
+        containers:
+        - name: nexus
+          image: sonatype/nexus3
+          env:
+          - name: MAX_HEAP
+            value: "800m"
+          - name: MIN_HEAP
+            value: "300m"
+          resources:
+            limits:
+              memory: "4Gi"
+              cpu: "4"
+            requests:
+              memory: "2Gi"
+              cpu: "1"
+          ports:
+            - containerPort: 8081
+          volumeMounts:
+            - name: nexus-storage
+              mountPath: /nexus-data
+        volumes:
+            - name: nexus-storage
+              persistentVolumeClaim:
+                claimName: nexus-storage
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexus
+  namespace: nexus
+  labels:
+    app: nexus
+spec:
+  ports:
+  - name: http
+    port: 8081
+    targetPort: 8081
+  selector:
+    app: nexus
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nexus
+  namespace: nexus
+  annotations:
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization,X-Forwarded-For"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: 100m
+    nginx.ingress.kubernetes.io/proxy-buffer-size: 10k
+    cert-manager.io/cluster-issuer: letsencrypt-prod-http
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/use-forwarded-headers: "true"
+    nginx.ingress.kubernetes.io/enable-real-ip: "true"
+    external-dns.alpha.kubernetes.io/hostname: nexus.explora.toolchain.mx
+    external-dns.alpha.kubernetes.io/ttl: "30"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - nexus.explora.toolchain.mx
+    secretName: nexus-tls
+  rules:
+    - host: nexus.example.com
+      http:
+        paths:
+        - path: /
+          pathType: Prefix
+          backend:
+            service:
+              name: nexus
+              port:
+                number: 8081
